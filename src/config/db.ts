@@ -21,7 +21,7 @@ const testConnection = async () => {
     console.log('✅ Database connected successfully');
     client.release();
   } catch (error) {
-    console.error('❌ Database connection failed:', error);
+    console.error('❌ Databas connection failed:', error);
   }
 };
 
