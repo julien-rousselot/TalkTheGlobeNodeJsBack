@@ -1,0 +1,5 @@
+.env
+README.md
+node_modules/
+package.json
+tsconfig.json
