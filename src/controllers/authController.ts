@@ -26,8 +26,8 @@ export const register = async (req: Request, res: Response) => {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
     const result = await database.query(
-      'INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email',
-      [email, hashedPassword]
+      'INSERT INTO users (email, password, role) VALUES ($1, $2, $3) RETURNING id, email',
+      [email, hashedPassword, 'admin']
     );
 
     res.status(201).json({ message: 'Admin créé', user: result.rows[0] });
@@ -46,7 +46,7 @@ export const login = async (req: Request, res: Response) => {
 
   try {
     const result = await database.query(
-      'SELECT id, email, password FROM users WHERE email = $1',
+      'SELECT id, email, password, role FROM users WHERE email = $1',
       [email]
     );
 
@@ -67,9 +67,9 @@ export const login = async (req: Request, res: Response) => {
     }
     
     const token = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, role: user.role },
       JWT_SECRET as string,
-      { expiresIn: '1h' }
+      { expiresIn: '2h' }
     );
 
     res.json({ message: 'Connexion réussie', token });

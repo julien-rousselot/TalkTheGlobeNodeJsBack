@@ -4,15 +4,14 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
-import { database } from './config/database'; // <--- nouvelle connexion via pg
+import { database } from './config/database';
 import router from './routes/routes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Autorise les requêtes provenant de ton front
 app.use(cors({
-  origin: 'http://localhost:5173', // ← adapte selon l’URL de ton front
+  origin: 'http://localhost:5173', 
   credentials: true
 }));
 
