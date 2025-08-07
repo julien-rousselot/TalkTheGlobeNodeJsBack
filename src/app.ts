@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
+import path from 'path';
 import cors from 'cors';
 import { database } from './config/database';
 import router from './routes/routes';
@@ -16,6 +17,7 @@ app.use(cors({
 }));
 
 // Middleware pour parser JSON
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

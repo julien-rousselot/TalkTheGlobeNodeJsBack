@@ -16,10 +16,12 @@ export const getAllMaterials = async (_req: Request, res: Response) => {
         m.title,
         m.description,
         m.price,
+        m.publish_at,
         p.id AS picture_id,
         p.url
       FROM materials m
       LEFT JOIN pictures p ON m.id = p.material_id
+      WHERE m.publish_at IS NULL OR m.publish_at <= NOW()
       ORDER BY m.id;
     `);
 
@@ -35,6 +37,7 @@ export const getAllMaterials = async (_req: Request, res: Response) => {
           title: row.title,
           description: row.description,
           price: row.price,
+          publishAt: row.publish_at,
           pictures: []
         };
       }
@@ -57,10 +60,24 @@ export const getAllMaterials = async (_req: Request, res: Response) => {
 };
 
 export const createMaterial = async (req: Request, res: Response) => {
-  const { title, description, price, pictures } = req.body as Material;
-
-  if (!title || typeof price !== 'number') {
+  const { title, description, price, isDraft, publish_at } = req.body;
+  const files = req.files as {[fieldname: string]: Express.Multer.File[];} | undefined;
+  
+  const priceNum = Number(price);
+  if (!title || isNaN(priceNum)) {
     return res.status(400).json({ error: 'Titre et prix valides requis' });
+  }
+
+  const allPictures: string[] = [];
+
+  if (files?.cover?.[0]) {
+    allPictures.push(`/uploads/${files.cover[0].filename}`);
+  }
+
+  if (files?.pictures?.length) {
+    files.pictures.forEach(file => {
+      allPictures.push(`/uploads/${file.filename}`);
+    });
   }
 
   const client = await database.connect();
@@ -69,19 +86,28 @@ export const createMaterial = async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     const materialResult = await client.query(
-      'INSERT INTO materials (title, description, price) VALUES ($1, $2, $3) RETURNING id',
-      [title, description || null, price]
+      'INSERT INTO materials (title, description, price, is_draft, publish_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [title, description, priceNum || null, isDraft === 'true', publish_at || null]
     );
+
     const materialId = materialResult.rows[0].id;
 
-    if (Array.isArray(pictures) && pictures.length > 0) {
-      const placeholders = pictures.map((_, i) => `($1, $${i + 2})`).join(', ');
-      const values = [materialId, ...pictures];
-      await client.query(`INSERT INTO pictures (material_id, url) VALUES ${placeholders}`, values);
+    // Insertion des images associées (seulement s'il y en a)
+    if (allPictures.length > 0) {
+      const placeholders = allPictures.map((_, i) => `($1, $${i + 2})`).join(', ');
+      const values = [materialId, ...allPictures];
+      await client.query(
+        `INSERT INTO pictures (material_id, url) VALUES ${placeholders}`,
+        values
+      );
     }
 
     await client.query('COMMIT');
-    res.status(201).json({ message: 'Matériel créé avec succès', id: materialId });
+    res.status(201).json({ 
+      message: 'Matériel créé avec succès', 
+      id: materialId,
+      pictures: allPictures 
+    });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('Erreur création matériel:', error);
