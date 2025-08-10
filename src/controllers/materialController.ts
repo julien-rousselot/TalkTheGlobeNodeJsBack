@@ -59,43 +59,142 @@ export const getAllMaterials = async (_req: Request, res: Response) => {
   }
 };
 
-export const createMaterial = async (req: Request, res: Response) => {
+export const getFreeMaterials = async (_req: Request, res: Response) => {
+  try {
+    const result = await database.query(`
+      SELECT 
+        m.id AS material_id,
+        m.title,
+        m.description,
+        m.price,
+        m.publish_at,
+        m.cover,
+        p.id AS picture_id,
+        p.url
+      FROM materials m
+      LEFT JOIN pictures p ON m.id = p.material_id
+      WHERE (m.publish_at IS NULL OR m.publish_at <= NOW())
+        AND m.price IS NULL
+      ORDER BY m.id;
+    `);
+
+    const materialsMap: { [key: number]: any } = {};
+
+    for (const row of result.rows) {
+      const id = row.material_id;
+
+      if (!materialsMap[id]) {
+        materialsMap[id] = {
+          id: row.material_id,
+          title: row.title,
+          description: row.description,
+          price: row.price,
+          publishAt: row.publish_at,
+          cover: row.cover,
+          pictures: []
+        };
+      }
+
+      if (row.picture_id) {
+        materialsMap[id].pictures.push({
+          id: row.picture_id,
+          url: row.url
+        });
+      }
+    }
+
+    const materials = Object.values(materialsMap);
+
+    res.json(materials);
+  } catch (error) {
+    console.error('Erreur récupération des matériels sans prix :', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+export const getPaidMaterials = async (_req: Request, res: Response) => {
+  try {
+    const result = await database.query(`
+      SELECT 
+        m.id AS material_id,
+        m.title,
+        m.description,
+        m.price,
+        m.publish_at,
+        p.id AS picture_id,
+        p.url
+      FROM materials m
+      LEFT JOIN pictures p ON m.id = p.material_id
+      WHERE (m.publish_at IS NULL OR m.publish_at <= NOW())
+        AND m.price IS NOT NULL
+      ORDER BY m.id;
+    `);
+
+    const materialsMap: { [key: number]: any } = {};
+
+    for (const row of result.rows) {
+      const id = row.material_id;
+
+      if (!materialsMap[id]) {
+        materialsMap[id] = {
+          id: row.material_id,
+          title: row.title,
+          description: row.description,
+          price: row.price,
+          publishAt: row.publish_at,
+          pictures: []
+        };
+      }
+
+      if (row.picture_id) {
+        materialsMap[id].pictures.push({
+          id: row.picture_id,
+          url: row.url
+        });
+      }
+    }
+
+    const materials = Object.values(materialsMap);
+
+    res.json(materials);
+  } catch (error) {
+    console.error('Erreur récupération des matériels avec prix :', error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+};
+
+export const createMaterial = async (req: Request, res: Response) => { 
   const { title, description, price, isDraft, publish_at } = req.body;
-  const files = req.files as {[fieldname: string]: Express.Multer.File[];} | undefined;
+  const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
   
   const priceNum = Number(price);
-  if (!title || isNaN(priceNum)) {
-    return res.status(400).json({ error: 'Titre et prix valides requis' });
+  if (!title || isNaN(priceNum) || !description || !files?.cover?.[0]) {
+    return res.status(400).json({ error: 'Title, description, valid price and cover are required' });
   }
 
-  const allPictures: string[] = [];
-
-  if (files?.cover?.[0]) {
-    allPictures.push(`/uploads/${files.cover[0].filename}`);
-  }
-
-  if (files?.pictures?.length) {
-    files.pictures.forEach(file => {
-      allPictures.push(`/uploads/${file.filename}`);
-    });
-  }
+  const coverUrl = `/uploads/${files.cover[0].filename}`;
 
   const client = await database.connect();
 
   try {
     await client.query('BEGIN');
 
+    // INSERT dans materials avec cover
     const materialResult = await client.query(
-      'INSERT INTO materials (title, description, price, is_draft, publish_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
-      [title, description, priceNum || null, isDraft === 'true', publish_at || null]
+      `INSERT INTO materials (title, description, price, is_draft, publish_at, cover) 
+       VALUES ($1, $2, $3, $4, $5::timestamp, $6) RETURNING id`,
+      [title, description, priceNum || null, isDraft === 'true', publish_at || null, coverUrl]
     );
 
     const materialId = materialResult.rows[0].id;
 
-    // Insertion des images associées (seulement s'il y en a)
-    if (allPictures.length > 0) {
-      const placeholders = allPictures.map((_, i) => `($1, $${i + 2})`).join(', ');
-      const values = [materialId, ...allPictures];
+    // Insérer les autres images dans pictures
+    if (files?.pictures?.length) {
+      const picturesUrls = files.pictures.map(file => `/uploads/${file.filename}`);
+
+      const placeholders = picturesUrls.map((_, i) => `($1, $${i + 2})`).join(', ');
+      const values = [materialId, ...picturesUrls];
+
       await client.query(
         `INSERT INTO pictures (material_id, url) VALUES ${placeholders}`,
         values
@@ -103,10 +202,11 @@ export const createMaterial = async (req: Request, res: Response) => {
     }
 
     await client.query('COMMIT');
+
     res.status(201).json({ 
       message: 'Matériel créé avec succès', 
       id: materialId,
-      pictures: allPictures 
+      cover: coverUrl
     });
   } catch (error) {
     await client.query('ROLLBACK');

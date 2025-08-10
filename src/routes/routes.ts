@@ -9,7 +9,9 @@ import {
   getAllMaterials,
   getMaterialById,
   updateMaterial,
-  deleteMaterial
+  deleteMaterial,
+  getFreeMaterials,
+  getPaidMaterials
 } from '../controllers/materialController';
 
 const router = Router();
@@ -19,7 +21,10 @@ router.post('/send-suggestion', sendSuggestion);
 router.post('/login', login);
 router.post('/register', register);
 
-router.get('/material', authenticateToken, requireAdmin, getAllMaterials);
+router.get('/materials/resource', getFreeMaterials);
+router.get('/material', requireAdmin, getAllMaterials);
+router.get('/materials/shop', getPaidMaterials);
+router.get('/material/:id', getMaterialById);
 router.post(
   '/material',
   authenticateToken,
@@ -30,7 +35,6 @@ router.post(
   ]),
   createMaterial
 );
-router.get('/material/:id', authenticateToken, requireAdmin, getMaterialById);
 router.put('/material/:id', authenticateToken, requireAdmin, updateMaterial);
 router.delete('/material/:id', authenticateToken, requireAdmin, deleteMaterial);
 
