@@ -16,6 +16,7 @@ export const getAllMaterials = async (_req: Request, res: Response) => {
         m.title,
         m.description,
         m.price,
+        m.pdf,
         m.publish_at,
         p.id AS picture_id,
         p.url
@@ -37,6 +38,7 @@ export const getAllMaterials = async (_req: Request, res: Response) => {
           title: row.title,
           description: row.description,
           price: row.price,
+          pdf: row.pdf,
           publishAt: row.publish_at,
           pictures: []
         };
@@ -70,7 +72,8 @@ export const getFreeMaterials = async (_req: Request, res: Response) => {
         m.publish_at,
         m.cover,
         p.id AS picture_id,
-        p.url
+        p.url,
+        m.pdf
       FROM materials m
       LEFT JOIN pictures p ON m.id = p.material_id
       WHERE (m.publish_at IS NULL OR m.publish_at <= NOW())
@@ -91,6 +94,7 @@ export const getFreeMaterials = async (_req: Request, res: Response) => {
           price: row.price,
           publishAt: row.publish_at,
           cover: row.cover,
+          pdf: row.pdf,
           pictures: []
         };
       }
@@ -122,7 +126,9 @@ export const getPaidMaterials = async (_req: Request, res: Response) => {
         m.price,
         m.publish_at,
         p.id AS picture_id,
-        p.url
+        p.url,
+        m.cover,
+        m.pdf
       FROM materials m
       LEFT JOIN pictures p ON m.id = p.material_id
       WHERE (m.publish_at IS NULL OR m.publish_at <= NOW())
@@ -142,6 +148,8 @@ export const getPaidMaterials = async (_req: Request, res: Response) => {
           description: row.description,
           price: row.price,
           publishAt: row.publish_at,
+          pdf: row.pdf,
+          cover: row.cover,
           pictures: []
         };
       }
@@ -149,7 +157,8 @@ export const getPaidMaterials = async (_req: Request, res: Response) => {
       if (row.picture_id) {
         materialsMap[id].pictures.push({
           id: row.picture_id,
-          url: row.url
+          url: row.url,
+          cover: row.cover,
         });
       }
     }
@@ -168,11 +177,13 @@ export const createMaterial = async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
   
   const priceNum = Number(price);
-  if (!title || isNaN(priceNum) || !description || !files?.cover?.[0]) {
-    return res.status(400).json({ error: 'Title, description, valid price and cover are required' });
+
+  if (!title || isNaN(priceNum) || !description || !files?.cover?.[0] || !files?.pdf?.[0]) {
+    return res.status(400).json({ error: 'Title, description, valid price, cover and PDF are required' });
   }
 
   const coverUrl = `/uploads/${files.cover[0].filename}`;
+  const pdfUrl = `/uploads/${files.pdf[0].filename}`;
 
   const client = await database.connect();
 
@@ -181,9 +192,9 @@ export const createMaterial = async (req: Request, res: Response) => {
 
     // INSERT dans materials avec cover
     const materialResult = await client.query(
-      `INSERT INTO materials (title, description, price, is_draft, publish_at, cover) 
-       VALUES ($1, $2, $3, $4, $5::timestamp, $6) RETURNING id`,
-      [title, description, priceNum || null, isDraft === 'true', publish_at || null, coverUrl]
+      `INSERT INTO materials (title, description, price, is_draft, publish_at, cover, pdf) 
+       VALUES ($1, $2, $3, $4, $5::timestamp, $6, $7) RETURNING id`,
+      [title, description, priceNum || null, isDraft === 'true', publish_at || null, coverUrl, pdfUrl]
     );
 
     const materialId = materialResult.rows[0].id;
@@ -206,7 +217,8 @@ export const createMaterial = async (req: Request, res: Response) => {
     res.status(201).json({ 
       message: 'Matériel créé avec succès', 
       id: materialId,
-      cover: coverUrl
+      cover: coverUrl,
+      pdf: pdfUrl
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -225,8 +237,9 @@ export const getMaterialById = async (req: Request, res: Response) => {
   }
 
   try {
+    // Récupérer le matériel
     const materialResult = await database.query(
-      'SELECT id, title, description, price FROM materials WHERE id = $1',
+      'SELECT * FROM materials WHERE id = $1',
       [id]
     );
 
@@ -236,11 +249,13 @@ export const getMaterialById = async (req: Request, res: Response) => {
 
     const material = materialResult.rows[0];
 
+    // Récupérer les images liées
     const picturesResult = await database.query(
       'SELECT id, url FROM pictures WHERE material_id = $1',
       [id]
     );
 
+    // Répondre avec le matériel et ses images
     res.json({
       ...material,
       pictures: picturesResult.rows

@@ -31,7 +31,8 @@ router.post(
   requireAdmin,
   upload.fields([
     { name: 'cover', maxCount: 1 },
-    { name: 'pictures', maxCount: 10 }
+    { name: 'pictures', maxCount: 10 },
+    { name: 'pdf', maxCount: 1 }
   ]),
   createMaterial
 );
