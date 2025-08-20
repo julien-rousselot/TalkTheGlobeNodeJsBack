@@ -173,24 +173,30 @@ export const getPaidMaterials = async (_req: Request, res: Response) => {
 };
 
 export const createMaterial = async (req: Request, res: Response) => { 
-  const { title, description, price, isDraft, publish_at } = req.body;
+  const { title, description, price, isDraft, publish_at, selectedResource } = req.body;
   const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
-  
+
   const priceNum = Number(price);
 
-  if (!title || isNaN(priceNum) || !description || !files?.cover?.[0] || !files?.pdf?.[0]) {
-    return res.status(400).json({ error: 'Title, description, valid price, cover and PDF are required' });
+  // Vérifications selon le type de ressource
+  if (selectedResource === 'free') {
+    if (!title || !description || !files?.cover?.[0] || !files?.pdf?.[0]) {
+      return res.status(400).json({ error: 'Title, description, cover and PDF are required for free resources' });
+    }
+  } else if (selectedResource === 'paid') {
+    if (!title || isNaN(priceNum) || !description || !files?.cover?.[0] || !files?.pdf?.[0] || !files?.pictures?.[0]) {
+      return res.status(400).json({ error: 'Title, description, price, cover, pictures and PDF are required for paid resources' });
+    }
   }
 
-  const coverUrl = `/uploads/${files.cover[0].filename}`;
-  const pdfUrl = `/uploads/${files.pdf[0].filename}`;
+  const coverUrl = files?.cover?.[0] ? `/uploads/${files.cover[0].filename}` : null;
+  const pdfUrl = files?.pdf?.[0] ? `/uploads/${files.pdf[0].filename}` : null;
 
   const client = await database.connect();
 
   try {
     await client.query('BEGIN');
 
-    // INSERT dans materials avec cover
     const materialResult = await client.query(
       `INSERT INTO materials (title, description, price, is_draft, publish_at, cover, pdf) 
        VALUES ($1, $2, $3, $4, $5::timestamp, $6, $7) RETURNING id`,
@@ -199,10 +205,8 @@ export const createMaterial = async (req: Request, res: Response) => {
 
     const materialId = materialResult.rows[0].id;
 
-    // Insérer les autres images dans pictures
     if (files?.pictures?.length) {
       const picturesUrls = files.pictures.map(file => `/uploads/${file.filename}`);
-
       const placeholders = picturesUrls.map((_, i) => `($1, $${i + 2})`).join(', ');
       const values = [materialId, ...picturesUrls];
 
@@ -265,6 +269,30 @@ export const getMaterialById = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Erreur serveur' });
   }
 };
+
+export const sendIdForPayment = async (id: number) => {
+  if (isNaN(id)) throw new Error('ID invalide');
+
+  const materialResult = await database.query(
+    'SELECT * FROM materials WHERE id = $1',
+    [id]
+  );
+
+  if (materialResult.rows.length === 0) return null;
+
+  const material = materialResult.rows[0];
+
+  const picturesResult = await database.query(
+    'SELECT id, url FROM pictures WHERE material_id = $1',
+    [id]
+  );
+
+  return {
+    ...material,
+    pictures: picturesResult.rows,
+  };
+};
+
 
 export const updateMaterial = async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);

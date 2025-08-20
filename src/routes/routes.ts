@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import bodyParser from 'body-parser';
 import { sendEmail, sendSuggestion } from '../controllers/mailerController';
 import { login, register } from '../controllers/authController';
 import { authenticateToken, requireAdmin } from '../middlewares/auth';
 import { upload } from '../middlewares/upload';
+import { getPaymentSession, createPaymentIntent, stripeWebhook } from '../controllers/stripeController';
 
 import {
   createMaterial,
@@ -11,7 +13,8 @@ import {
   updateMaterial,
   deleteMaterial,
   getFreeMaterials,
-  getPaidMaterials
+  getPaidMaterials,
+  downloadMaterial
 } from '../controllers/materialController';
 
 const router = Router();
@@ -25,19 +28,14 @@ router.get('/materials/resource', getFreeMaterials);
 router.get('/material', requireAdmin, getAllMaterials);
 router.get('/materials/shop', getPaidMaterials);
 router.get('/material/:id', getMaterialById);
-router.post(
-  '/material',
-  authenticateToken,
-  requireAdmin,
-  upload.fields([
-    { name: 'cover', maxCount: 1 },
-    { name: 'pictures', maxCount: 10 },
-    { name: 'pdf', maxCount: 1 }
-  ]),
-  createMaterial
-);
+router.post('/material', authenticateToken, requireAdmin, upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'pictures', maxCount: 10 }, { name: 'pdf', maxCount: 1 }]), createMaterial);
 router.put('/material/:id', authenticateToken, requireAdmin, updateMaterial);
 router.delete('/material/:id', authenticateToken, requireAdmin, deleteMaterial);
+router.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), stripeWebhook);
+router.get("/download/:id", authenticateToken, downloadMaterial);
 
+// Création paiement
+router.post('/stripe/create-payment-intent', createPaymentIntent);
+router.post('/stripe/payment-session', getPaymentSession);
 
 export default router;

@@ -17,10 +17,11 @@ app.use(cors({
 
 // Middleware pour parser JSON
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
 
 // Routes principales
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use('/api', router);
 
 // Tester la connexion à la DB au démarrage
