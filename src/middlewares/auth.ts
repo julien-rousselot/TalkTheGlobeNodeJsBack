@@ -1,13 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-
-interface AuthRequest extends Request {
-  user?: {
-    id: number;
-    email: string;
-    role: string;
-  };
-}
+import { AuthRequest } from '../types';
 
 // Middleware pour vérifier le token JWT
 export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -27,7 +20,7 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
     if (err) {
       return res.status(403).json({ error: 'Token invalide ou expiré' });
     }
-    req.user = user;
+    req.user = user as AuthRequest['user'];
     next();
   });
 };
