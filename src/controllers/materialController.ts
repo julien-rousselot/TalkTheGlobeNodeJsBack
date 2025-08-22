@@ -485,7 +485,6 @@ export const downloadMaterial = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Exemple check paiement
 async function checkIfUserPaid(userId: number, materialId: number): Promise<boolean> {
   // Ici tu relies Stripe & ta DB pour vérifier si l'utilisateur a bien payé ce produit
   // Exemple fictif : SELECT FROM purchases WHERE user_id = ? AND material_id = ?

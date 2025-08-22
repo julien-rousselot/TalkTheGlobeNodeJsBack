@@ -10,9 +10,9 @@ export const sendEmail = async (req: Request, res: Response) => {
   }
 
   const mailOptions = {
-    from: 'talktheglobe7@gmail.com',
+    from: process.env.EMAIL_USER,
     replyTo: email,
-    to: 'talktheglobe7@gmail.com',
+    to: process.env.EMAIL_USER,
     subject: `Nouveau message de ${name}`,
     text: message,
   };
@@ -34,8 +34,8 @@ export const sendSuggestion = async (req: Request, res: Response) => {
   }
 
   const mailOptions = {
-    from: 'talktheglobe7@gmail.com',
-    to: 'talktheglobe7@gmail.com',
+    from: process.env.EMAIL_USER,
+    to: process.env.EMAIL_USER,
     subject: 'Nouvelle suggestion',
     text: message,
   };

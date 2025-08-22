@@ -1,7 +1,8 @@
-import { Request, Response } from 'express';
+import e, { Request, Response } from 'express';
 import Stripe from 'stripe';
 import {sendIdForPayment} from './materialController'
 import dotenv from 'dotenv';
+import { sendPurchasedPDFs } from '../services/sendPDF';
 dotenv.config();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
@@ -57,6 +58,53 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
   }
 };
 
+export const handleStripeWebhook = async (req: Request, res: Response) => {
+  const sig = req.headers["stripe-signature"]!;
+  try {
+    const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
+
+    if (event.type === "payment_intent.succeeded") {
+      const paymentIntent = event.data.object as Stripe.PaymentIntent;
+      console.log("✅ Paiement réussi :", paymentIntent.id);
+
+      // Validate required metadata
+      const customerEmail = paymentIntent.metadata.email;
+      const itemsData = paymentIntent.metadata.items;
+
+      if (!customerEmail) {
+        console.error("❌ Email client manquant dans les métadonnées");
+        return res.status(400).json({ error: "Email client requis" });
+      }
+
+      if (!itemsData) {
+        console.error("❌ Données d'articles manquantes dans les métadonnées");
+        return res.status(400).json({ error: "Données d'articles requises" });
+      }
+
+      try {
+        const purchasedItems = JSON.parse(itemsData);
+        console.log(`📧 Envoi des PDFs à ${customerEmail} pour ${purchasedItems.length} articles`);
+        
+        // Send PDFs to customer
+        const success = await sendPurchasedPDFs(customerEmail, purchasedItems);
+        
+        if (success) {
+          console.log(`✅ PDFs envoyés avec succès à ${customerEmail}`);
+        } else {
+          console.error(`❌ Échec de l'envoi des PDFs à ${customerEmail}`);
+        }
+      } catch (parseError) {
+        console.error("❌ Erreur parsing des articles:", parseError);
+      }
+    }
+    
+    res.json({ received: true });
+  } catch (err: any) {
+    console.error("⚠️ Webhook error:", err.message);
+    res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+};
+
 // Récupération de la session
 export const getPaymentSession = async (req: Request, res: Response) => {
   try {
@@ -67,11 +115,9 @@ export const getPaymentSession = async (req: Request, res: Response) => {
     }
 
     const paymentIntent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
-
+ 
     // On récupère directement les items depuis le PaymentIntent
-    const purchasedItems = paymentIntent.metadata.items
-      ? JSON.parse(paymentIntent.metadata.items)
-      : [];
+    const purchasedItems = paymentIntent.metadata.items ? JSON.parse(paymentIntent.metadata.items) : [];
 
     res.json({
       id: paymentIntent.id,
@@ -87,28 +133,3 @@ export const getPaymentSession = async (req: Request, res: Response) => {
   }
 };
 
-
-export const stripeWebhook = (req: Request, res: Response) => {
-  const sig = req.headers['stripe-signature'] as string;
-
-  try {
-    const event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET as string
-    );
-
-    if (event.type === 'payment_intent.succeeded') {
-      const paymentIntent = event.data.object as Stripe.PaymentIntent;
-      const materialId = paymentIntent.metadata.materialId;
-
-      console.log(`✅ Paiement réussi pour matériel ${materialId}`);
-      // updateMaterialAsPaid(materialId);
-    }
-
-    res.json({ received: true });
-  } catch (err) {
-    console.error('Erreur Webhook', err);
-    res.status(400).send(`Webhook Error: ${(err as Error).message}`);
-  }
-};

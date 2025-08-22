@@ -4,7 +4,7 @@ import { sendEmail, sendSuggestion } from '../controllers/mailerController';
 import { login, register } from '../controllers/authController';
 import { authenticateToken, requireAdmin } from '../middlewares/auth';
 import { upload } from '../middlewares/upload';
-import { getPaymentSession, createPaymentIntent, stripeWebhook } from '../controllers/stripeController';
+import { getPaymentSession, createPaymentIntent } from '../controllers/stripeController';
 
 import {
   createMaterial,
@@ -31,11 +31,11 @@ router.get('/material/:id', getMaterialById);
 router.post('/material', authenticateToken, requireAdmin, upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'pictures', maxCount: 10 }, { name: 'pdf', maxCount: 1 }]), createMaterial);
 router.put('/material/:id', authenticateToken, requireAdmin, updateMaterial);
 router.delete('/material/:id', authenticateToken, requireAdmin, deleteMaterial);
-router.post('/stripe/webhook', bodyParser.raw({ type: 'application/json' }), stripeWebhook);
 router.get("/download/:id", authenticateToken, downloadMaterial);
 
 // Création paiement
 router.post('/stripe/create-payment-intent', createPaymentIntent);
+// router.post("/webhook", handleStripeWebhook);
 router.post('/stripe/payment-session', getPaymentSession);
 
 export default router;
