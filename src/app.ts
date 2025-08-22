@@ -1,29 +1,39 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import cors from 'cors';
-import express from 'express';
-import authRoutes from './routes/auth';
-import materialRoutes from './routes/material';
 
-import { pool, testConnection } from './config/db';
+import express from 'express';
+import path from 'path';
+import cors from 'cors';
+import { database } from './config/database';
+import router from './routes/routes';
+import { handleStripeWebhook } from './controllers/stripeController';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:5173', 
+  credentials: true
+}));
+
+// Middleware pour parser JSON
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+app.post("/webhook", express.raw({ type: "application/json" }), handleStripeWebhook);
+
+// Routes principales
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/api', router);
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/materials', materialRoutes);
+// Tester la connexion à la DB au démarrage
+database.connect()
+  .then(() => console.log('✅ Connexion à PostgreSQL réussie'))
+  .catch((err) => console.error('❌ Erreur de connexion à PostgreSQL :', err));
 
-// Test database connection on startup
-testConnection();
 
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
 });
 
-export { pool };
+

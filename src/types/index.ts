@@ -1,8 +1,17 @@
+import { Request } from "express";
+
 export interface User {
-    id: string;
-    username: string;
+    id: number;
     email: string;
     password: string;
+}
+
+export interface AuthRequest extends Request {
+  user?: {
+    id: number | string;
+    email: string;
+    role: string;
+  };
 }
 
 export interface Post {
