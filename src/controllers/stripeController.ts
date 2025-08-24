@@ -1,8 +1,10 @@
-import e, { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import Stripe from 'stripe';
 import {sendIdForPayment} from './materialController'
 import dotenv from 'dotenv';
 import { sendPurchasedPDFs } from '../services/sendPDF';
+import { database } from "../config/database";
+
 dotenv.config();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
@@ -12,42 +14,39 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
 // Création du PaymentIntent
 export const createPaymentIntent = async (req: Request, res: Response) => {
   const { items, email } = req.body as { items: { id: number; quantity: number }[], email: string };
+  
   if (!email) {
     return res.status(400).json({ error: "Email requis pour l'envoi du PDF" });
   }
+
   try {
     if (!items || items.length === 0) {
       return res.status(400).json({ error: "Aucun article fourni" });
     }
 
     let totalAmount = 0;
-    const enrichedItems: { id: number; title: string; quantity: number; amount: number; cover: string }[] = [];
 
+    // Vérifie les prix depuis la DB
     for (const item of items) {
       const material = await sendIdForPayment(item.id);
-      console.log(material);
 
       if (!material || material.price == null || !item.quantity) {
         throw new Error(`Prix ou quantité invalide pour l'article : ${JSON.stringify(item)}`);
       }
 
       totalAmount += material.price * item.quantity;
-
-      enrichedItems.push({
-        id: item.id,
-        title: material.title,
-        quantity: item.quantity,
-        amount: Math.round(material.price * 100),
-        cover: material.cover
-      });
     }
 
     const totalInCents = Math.round(totalAmount * 100);
 
+    // ⚠️ Ici on ne met QUE id et quantity dans le metadata
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalInCents,
       currency: 'eur',
-      metadata: { items: JSON.stringify(enrichedItems), email },
+      metadata: {
+        items: JSON.stringify(items), // seulement [{id, quantity}, ...]
+        email,
+      },
       automatic_payment_methods: { enabled: true },
     });
 
@@ -59,15 +58,19 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
 };
 
 export const handleStripeWebhook = async (req: Request, res: Response) => {
-  const sig = req.headers["stripe-signature"]!;
+  const signature = req.headers["stripe-signature"]!;
+
   try {
-    const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
+    const event = stripe.webhooks.constructEvent(
+      req.body,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET!
+    );
 
     if (event.type === "payment_intent.succeeded") {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
-      console.log("✅ Paiement réussi :", paymentIntent.id);
 
-      // Validate required metadata
+      // Récupère les métadonnées
       const customerEmail = paymentIntent.metadata.email;
       const itemsData = paymentIntent.metadata.items;
 
@@ -82,22 +85,39 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
       }
 
       try {
-        const purchasedItems = JSON.parse(itemsData);
-        console.log(`📧 Envoi des PDFs à ${customerEmail} pour ${purchasedItems.length} articles`);
-        
-        // Send PDFs to customer
-        const success = await sendPurchasedPDFs(customerEmail, purchasedItems);
-        
-        if (success) {
-          console.log(`✅ PDFs envoyés avec succès à ${customerEmail}`);
-        } else {
-          console.error(`❌ Échec de l'envoi des PDFs à ${customerEmail}`);
-        }
+        const purchasedItems: { id: number; quantity: number }[] = JSON.parse(itemsData);
+
+        // 🔎 Récupère les infos complètes depuis ta DB
+        const ids = purchasedItems.map((i) => i.id);
+
+        const result = await database.query(
+          `SELECT id, title, price, cover, pdf FROM materials WHERE id = ANY($1)`,
+          [ids]
+        );
+
+        const enrichedItems = purchasedItems.map((item) => {
+          const material = result.rows.find((row) => row.id === item.id);
+          if (!material) {
+            throw new Error(`Article id=${item.id} introuvable en base`);
+          }
+
+          return {
+            id: item.id,
+            title: material.title,
+            quantity: item.quantity,
+            amount: Math.round(material.price * 100), // en cents
+            cover: material.cover,
+          };
+        });
+
+        // ✅ Envoi des PDFs enrichis
+        await sendPurchasedPDFs(customerEmail, enrichedItems);
+
       } catch (parseError) {
         console.error("❌ Erreur parsing des articles:", parseError);
       }
     }
-    
+
     res.json({ received: true });
   } catch (err: any) {
     console.error("⚠️ Webhook error:", err.message);
@@ -114,17 +134,47 @@ export const getPaymentSession = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "payment_intent_id is required" });
     }
 
+    // 🔎 On récupère le PaymentIntent depuis Stripe
     const paymentIntent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
- 
-    // On récupère directement les items depuis le PaymentIntent
-    const purchasedItems = paymentIntent.metadata.items ? JSON.parse(paymentIntent.metadata.items) : [];
+
+    // Parse les items de la metadata
+    const purchasedItems: { id: number; quantity: number }[] = paymentIntent.metadata.items 
+      ? JSON.parse(paymentIntent.metadata.items) 
+      : [];
+
+    let enrichedItems: any[] = [];
+
+    if (purchasedItems.length > 0) {
+      const ids = purchasedItems.map((i) => i.id);
+
+      // 🔎 On récupère les infos complètes depuis ta DB
+      const result = await database.query(
+        `SELECT id, title, price, cover FROM materials WHERE id = ANY($1)`,
+        [ids]
+      );
+
+      enrichedItems = purchasedItems.map((item) => {
+        const material = result.rows.find((row) => row.id === item.id);
+        if (!material) {
+          throw new Error(`Article id=${item.id} introuvable en base`);
+        }
+
+        return {
+          id: item.id,
+          title: material.title,
+          cover: material.cover,
+          quantity: item.quantity,
+          amount: Math.round(material.price * 100), // prix en cents
+        };
+      });
+    }
 
     res.json({
       id: paymentIntent.id,
       amount_total: paymentIntent.amount,
       currency: paymentIntent.currency,
       status: paymentIntent.status,
-      items: purchasedItems,
+      items: enrichedItems, // ✅ items enrichis avec cover & title
       customer_email: paymentIntent.receipt_email || paymentIntent.metadata.email,
     });
   } catch (err: any) {
@@ -132,4 +182,5 @@ export const getPaymentSession = async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message || "Erreur serveur" });
   }
 };
+
 
