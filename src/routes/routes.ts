@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import bodyParser from 'body-parser';
 import { sendEmail, sendSuggestion } from '../controllers/mailerController';
 import { login, register } from '../controllers/authController';
 import { authenticateToken, requireAdmin } from '../middlewares/auth';
 import { upload } from '../middlewares/upload';
 import { getPaymentSession, createPaymentIntent } from '../controllers/stripeController';
+import { SuscribeNewsletter } from '../controllers/suscribersController';
 
 import {
   createMaterial,
@@ -23,6 +23,7 @@ router.post('/send-email', sendEmail);
 router.post('/send-suggestion', sendSuggestion);
 router.post('/login', login);
 router.post('/register', register);
+router.post('/subscribe-newsletter', SuscribeNewsletter)
 
 router.get('/materials/resource', getFreeMaterials);
 router.get('/material', requireAdmin, getAllMaterials);
@@ -35,7 +36,6 @@ router.get("/download/:id", authenticateToken, downloadMaterial);
 
 // Création paiement
 router.post('/stripe/create-payment-intent', createPaymentIntent);
-// router.post("/webhook", handleStripeWebhook);
 router.post('/stripe/payment-session', getPaymentSession);
 
 export default router;

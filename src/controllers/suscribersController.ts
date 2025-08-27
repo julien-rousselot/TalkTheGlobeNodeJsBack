@@ -1,0 +1,36 @@
+import { Request, Response } from "express";
+import { database } from "../config/database";
+
+interface Subscribers {
+  email: string;
+  consent: boolean;
+}
+
+export const SuscribeNewsletter = async (req: Request, res: Response) => {
+  const { email, consent } = req.body as Subscribers;
+  console.log("Received subscription request:", { email, consent });
+  if (!email) {
+    return res.status(400).json({ error: "Email is required" });
+  }
+
+  if (consent === undefined || consent === null) {
+    return res.status(400).json({ error: "Consent is required" });
+  }
+
+  try {
+    // Use UPSERT to insert new or update existing subscriber
+    await database.query(`
+      INSERT INTO newsletter_subscribers (email, consent, created_at) 
+      VALUES ($1, $2, NOW())
+      ON CONFLICT (email) 
+      DO UPDATE SET 
+        consent = EXCLUDED.consent,
+        created_at = NOW()
+    `, [email, consent]);
+
+    res.status(201).json({ message: "Newsletter subscription successful" });
+  } catch (error) {
+    console.error("Error subscribing to newsletter:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};

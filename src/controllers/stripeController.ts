@@ -22,13 +22,21 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
 
     let totalAmount = 0;
     const enrichedItems: { id: number; title: string; quantity: number; amount: number; cover: string }[] = [];
+    const metadataItems: { id: number; quantity: number }[] = [];
 
     for (const item of items) {
       const material = await sendIdForPayment(item.id);
-      console.log(material);
 
-      if (!material || material.price == null || !item.quantity) {
-        throw new Error(`Prix ou quantité invalide pour l'article : ${JSON.stringify(item)}`);
+      if (!material) {
+        throw new Error(`Matériel avec l'ID ${item.id} introuvable`);
+      }
+      
+      if (material.price == null) {
+        throw new Error(`Prix manquant pour le matériel ID ${item.id}: ${material.title}`);
+      }
+      
+      if (!item.quantity || item.quantity <= 0) {
+        throw new Error(`Quantité invalide pour l'article ID ${item.id}: ${item.quantity}`);
       }
 
       totalAmount += material.price * item.quantity;
@@ -40,6 +48,12 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
         amount: Math.round(material.price * 100),
         cover: material.cover
       });
+
+      // Store only essential data for metadata (to avoid 500 char limit)
+      metadataItems.push({
+        id: item.id,
+        quantity: item.quantity
+      });
     }
 
     const totalInCents = Math.round(totalAmount * 100);
@@ -47,25 +61,30 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalInCents,
       currency: 'eur',
-      metadata: { items: JSON.stringify(enrichedItems), email },
+      metadata: { items: JSON.stringify(metadataItems), email },
       automatic_payment_methods: { enabled: true },
     });
 
     res.json({ clientSecret: paymentIntent.client_secret });
   } catch (error: any) {
     console.error('Erreur création PaymentIntent', error);
-    res.status(500).json({ error: 'Impossible de créer le paiement' });
+    res.status(500).json({ 
+      error: 'Impossible de créer le paiement',
+      details: error.message 
+    });
   }
 };
 
 export const handleStripeWebhook = async (req: Request, res: Response) => {
   const sig = req.headers["stripe-signature"]!;
+  console.log("🔧 Webhook received:");
   try {
     const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-
+    console.log("🔧 Webhook event constructed:", event);
     if (event.type === "payment_intent.succeeded") {
       const paymentIntent = event.data.object as Stripe.PaymentIntent;
       console.log("✅ Paiement réussi :", paymentIntent.id);
+      console.log("✅ Paiement réussi :", paymentIntent);
 
       // Validate required metadata
       const customerEmail = paymentIntent.metadata.email;
@@ -82,11 +101,28 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
       }
 
       try {
-        const purchasedItems = JSON.parse(itemsData);
-        console.log(`📧 Envoi des PDFs à ${customerEmail} pour ${purchasedItems.length} articles`);
+        const simplifiedItems = JSON.parse(itemsData);
+        console.log(`📧 Préparation de l'envoi des PDFs à ${customerEmail} pour ${simplifiedItems.length} articles`);
+        
+        // Reconstruct enriched items for the sendPurchasedPDFs function
+        const enrichedItems = [];
+        for (const item of simplifiedItems) {
+          const material = await sendIdForPayment(item.id);
+          if (material) {
+            enrichedItems.push({
+              id: item.id,
+              title: material.title,
+              quantity: item.quantity,
+              amount: Math.round(material.price * 100),
+              cover: material.cover
+            });
+          }
+        }
         
         // Send PDFs to customer
-        const success = await sendPurchasedPDFs(customerEmail, purchasedItems);
+        console.log("  Email:", customerEmail);
+
+        const success = await sendPurchasedPDFs(customerEmail, enrichedItems);
         
         if (success) {
           console.log(`✅ PDFs envoyés avec succès à ${customerEmail}`);
@@ -100,6 +136,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
     
     res.json({ received: true });
   } catch (err: any) {
+    console.log("⚠️ Webhook error:", err);
     console.error("⚠️ Webhook error:", err.message);
     res.status(400).send(`Webhook Error: ${err.message}`);
   }
@@ -116,15 +153,29 @@ export const getPaymentSession = async (req: Request, res: Response) => {
 
     const paymentIntent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
  
-    // On récupère directement les items depuis le PaymentIntent
-    const purchasedItems = paymentIntent.metadata.items ? JSON.parse(paymentIntent.metadata.items) : [];
+    // Reconstruct enriched items from metadata with all necessary information
+    const simplifiedItems = paymentIntent.metadata.items ? JSON.parse(paymentIntent.metadata.items) : [];
+    const enrichedItems = [];
+    
+    for (const item of simplifiedItems) {
+      const material = await sendIdForPayment(item.id);
+      if (material) {
+        enrichedItems.push({
+          id: item.id,
+          title: material.title,
+          quantity: item.quantity,
+          amount: Math.round(material.price * 100), // Amount in cents
+          cover: material.cover
+        });
+      }
+    }
 
     res.json({
       id: paymentIntent.id,
       amount_total: paymentIntent.amount,
       currency: paymentIntent.currency,
       status: paymentIntent.status,
-      items: purchasedItems,
+      items: enrichedItems, // Return enriched items with amount
       customer_email: paymentIntent.receipt_email || paymentIntent.metadata.email,
     });
   } catch (err: any) {
