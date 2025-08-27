@@ -17,17 +17,12 @@ export const sendPurchasedPDFs = async (
     console.warn("Email vide ou aucun article à envoyer.");
     return false;
   }
-
   try {
-    console.log(`🔧 Preparing to send PDFs to ${email} for ${items.length} items`);
-
     const ids = items.map(i => i.id);
     const result = await database.query(
       `SELECT id, title, pdf FROM materials WHERE id = ANY($1)`,
       [ids]
     );
-
-    console.log(`📄 Found ${result.rows.length} materials in database`);
 
     const attachments = [];
     const itemTitles: string[] = [];
@@ -69,7 +64,6 @@ export const sendPurchasedPDFs = async (
       });
 
       itemTitles.push(row.title);
-      console.log(`✅ Added PDF attachment for: ${row.title} (${pdfBuffer.length} bytes)`);
     }
 
     if (attachments.length === 0) {
@@ -77,26 +71,22 @@ export const sendPurchasedPDFs = async (
       return false;
     }
 
-    console.log(`📧 Sending email with ${attachments.length} PDF attachments to ${email}`);
-
     await transporter.sendMail({
       from: process.env.EMAIL_USER || 'talktheglobe7@gmail.com',
       to: email,
-      subject: "Votre achat TalkTheGlobe - Documents PDF",
+      subject: "Your TalkTheGlobe Purchase - PDF Documents",
       html: `
-        <h2>Merci pour votre achat !</h2>
-        <p>Bonjour,</p>
-        <p>Merci d'avoir effectué un achat sur TalkTheGlobe. Vous trouverez en pièces jointes les documents PDF que vous avez achetés :</p>
+        <h2>Thank you for your purchase!</h2>
+        <p>Hello,</p>
+        <p>Thank you for making a purchase on TalkTheGlobe. Please find attached the PDF documents you purchased:</p>
         <ul>
           ${itemTitles.map(title => `<li>${title}</li>`).join('')}
         </ul>
-        <p>Nous espérons que ces ressources vous seront utiles dans votre apprentissage !</p>
-        <p>Cordialement,<br>L'équipe TalkTheGlobe</p>
+        <p>We hope these resources will be useful for your learning!</p>
+        <p>Best regards,<br>The TalkTheGlobe Team</p>
       `,
       attachments,
     });
-
-    console.log("✅ Email avec PDFs envoyé avec succès à", email);
     return true;
   } catch (err) {
     console.error("❌ Erreur envoi email avec PDFs:", err);

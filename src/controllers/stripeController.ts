@@ -1,8 +1,10 @@
-import e, { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import Stripe from 'stripe';
 import {sendIdForPayment} from './materialController'
 import dotenv from 'dotenv';
 import { sendPurchasedPDFs } from '../services/sendPDF';
+import { database } from "../config/database";
+
 dotenv.config();
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
@@ -12,9 +14,11 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
 // Création du PaymentIntent
 export const createPaymentIntent = async (req: Request, res: Response) => {
   const { items, email } = req.body as { items: { id: number; quantity: number }[], email: string };
+  
   if (!email) {
     return res.status(400).json({ error: "Email requis pour l'envoi du PDF" });
   }
+
   try {
     if (!items || items.length === 0) {
       return res.status(400).json({ error: "Aucun article fourni" });
@@ -24,6 +28,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
     const enrichedItems: { id: number; title: string; quantity: number; amount: number; cover: string }[] = [];
     const metadataItems: { id: number; quantity: number }[] = [];
 
+    // Vérifie les prix depuis la DB
     for (const item of items) {
       const material = await sendIdForPayment(item.id);
 
@@ -58,6 +63,7 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
 
     const totalInCents = Math.round(totalAmount * 100);
 
+    // ⚠️ Ici on ne met QUE id et quantity dans le metadata
     const paymentIntent = await stripe.paymentIntents.create({
       amount: totalInCents,
       currency: 'eur',
@@ -86,7 +92,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
       console.log("✅ Paiement réussi :", paymentIntent.id);
       console.log("✅ Paiement réussi :", paymentIntent);
 
-      // Validate required metadata
+      // Récupère les métadonnées
       const customerEmail = paymentIntent.metadata.email;
       const itemsData = paymentIntent.metadata.items;
 
@@ -133,7 +139,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
         console.error("❌ Erreur parsing des articles:", parseError);
       }
     }
-    
+
     res.json({ received: true });
   } catch (err: any) {
     console.log("⚠️ Webhook error:", err);
@@ -151,6 +157,7 @@ export const getPaymentSession = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "payment_intent_id is required" });
     }
 
+    // 🔎 On récupère le PaymentIntent depuis Stripe
     const paymentIntent: Stripe.PaymentIntent = await stripe.paymentIntents.retrieve(payment_intent_id);
  
     // Reconstruct enriched items from metadata with all necessary information
@@ -183,4 +190,5 @@ export const getPaymentSession = async (req: Request, res: Response) => {
     res.status(500).json({ error: err.message || "Erreur serveur" });
   }
 };
+
 
