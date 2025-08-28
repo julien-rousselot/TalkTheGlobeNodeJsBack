@@ -16,7 +16,6 @@ const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY, {
 // Création du PaymentIntent
 const createPaymentIntent = async (req, res) => {
     const { items, email } = req.body;
-    console.log('Création d\'un PaymentIntent pour l\'email:');
     if (!email) {
         return res.status(400).json({ error: "Email requis pour l'envoi du PDF" });
     }
@@ -71,51 +70,29 @@ const createPaymentIntent = async (req, res) => {
 exports.createPaymentIntent = createPaymentIntent;
 const handleStripeWebhook = async (req, res) => {
     const sig = req.headers["stripe-signature"];
-    console.log("🔧 Webhook received:");
     try {
         const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-        console.log("🔧 Webhook event constructed:", event.type);
         // helper to process a PaymentIntent object (shared between events)
-        // Adds idempotency by recording processed payment/charge ids in the database.
-        const processPaymentIntent = async (paymentIntent, uniqueIdOverride) => {
+        const processPaymentIntent = async (paymentIntent) => {
             if (!paymentIntent)
-                return false;
-            const procId = uniqueIdOverride || `payment_intent:${paymentIntent.id}`;
-            console.log("✅ Processing PaymentIntent:", paymentIntent.id, "procId:", procId);
-            // Ensure idempotency table exists (cheap, safe operation)
-            try {
-                await database_1.database.query(`CREATE TABLE IF NOT EXISTS stripe_processed_payments (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT now())`);
-            }
-            catch (e) {
-                console.error('❌ Failed to ensure idempotency table exists:', e);
-                // continue; we'll still try to insert/check
-            }
-            // Try to insert a record for this procId. If it already exists, skip processing.
-            try {
-                await database_1.database.query('INSERT INTO stripe_processed_payments(id) VALUES($1)', [procId]);
-            }
-            catch (e) {
-                // Postgres unique violation code
-                if (e && (e.code === '23505' || (e.message && e.message.includes('duplicate key')))) {
-                    console.log(`ℹ️ Already processed ${procId}, skipping.`);
-                    return false;
-                }
-                console.error('❌ DB error inserting processed id for', procId, e);
-                return false;
+                return;
+            // Check if we've already processed this payment to avoid duplicate emails
+            const existingProcessed = await database_1.database.query('SELECT id FROM processed_payments WHERE payment_intent_id = $1', [paymentIntent.id]);
+            if (existingProcessed.rows.length > 0) {
+                return;
             }
             const customerEmail = paymentIntent.metadata.email;
             const itemsData = paymentIntent.metadata.items;
             if (!customerEmail) {
-                console.error("❌ Email client manquant dans les métadonnées");
-                return false;
+                return;
             }
             if (!itemsData) {
-                console.error("❌ Données d'articles manquantes dans les métadonnées");
-                return false;
+                return;
             }
             try {
+                // Mark as processing to prevent concurrent processing
+                await database_1.database.query('INSERT INTO processed_payments (payment_intent_id, status, processed_at) VALUES ($1, $2, NOW()) ON CONFLICT (payment_intent_id) DO NOTHING', [paymentIntent.id, 'processing']);
                 const simplifiedItems = JSON.parse(itemsData);
-                console.log(`📧 Préparation de l'envoi des PDFs à ${customerEmail} pour ${simplifiedItems.length} articles`);
                 const enrichedItems = [];
                 for (const item of simplifiedItems) {
                     const material = await (0, materialController_1.sendIdForPayment)(item.id);
@@ -129,20 +106,14 @@ const handleStripeWebhook = async (req, res) => {
                         });
                     }
                 }
-                console.log("🔧 About to call sendPurchasedPDFs for:", customerEmail, "items:", enrichedItems.length);
                 const success = await (0, sendPDF_1.sendPurchasedPDFs)(customerEmail, enrichedItems);
-                if (success) {
-                    console.log(`✅ PDFs envoyés avec succès à ${customerEmail}`);
-                    return true;
-                }
-                else {
-                    console.error(`❌ Échec de l'envoi des PDFs à ${customerEmail}`);
-                    return false;
-                }
+                // Update status based on success
+                const finalStatus = success ? 'completed' : 'failed';
+                await database_1.database.query('UPDATE processed_payments SET status = $1, processed_at = NOW() WHERE payment_intent_id = $2', [finalStatus, paymentIntent.id]);
             }
             catch (parseError) {
-                console.error("❌ Erreur parsing des articles:", parseError);
-                return false;
+                // Mark as failed
+                await database_1.database.query('UPDATE processed_payments SET status = $1, processed_at = NOW() WHERE payment_intent_id = $2', ['failed', paymentIntent.id]);
             }
         };
         if (event.type === "payment_intent.succeeded") {
@@ -152,21 +123,18 @@ const handleStripeWebhook = async (req, res) => {
         else if (event.type === 'charge.succeeded') {
             // A Charge may be created/updated independently; try to find its PaymentIntent
             const charge = event.data.object;
-            console.log('🔔 charge.succeeded received for charge:', charge.id);
             // Prefer metadata on charge if present
             const chargeEmail = (charge.metadata && charge.metadata.email) || undefined;
             const chargeItems = (charge.metadata && charge.metadata.items) || undefined;
             if (chargeEmail && chargeItems) {
                 try {
                     const simplifiedItems = JSON.parse(chargeItems);
-                    // Build a fake paymentIntent-like object to reuse the processor
-                    // Use a distinct id when no payment_intent exists to avoid collision
-                    const fakeId = charge.payment_intent ? charge.payment_intent : `charge:${charge.id}`;
-                    const fakePI = { id: fakeId, metadata: { email: chargeEmail, items: chargeItems } };
-                    await processPaymentIntent(fakePI);
+                    // Build a paymentIntent-like object to reuse the processor
+                    const chargePI = { id: charge.payment_intent || `charge_${charge.id}`, metadata: { email: chargeEmail, items: chargeItems } };
+                    await processPaymentIntent(chargePI);
                 }
                 catch (e) {
-                    console.error('❌ Failed to parse items from charge metadata:', e);
+                    // Handle error silently
                 }
             }
             else if (charge.payment_intent) {
@@ -175,18 +143,13 @@ const handleStripeWebhook = async (req, res) => {
                     await processPaymentIntent(pi);
                 }
                 catch (e) {
-                    console.error('❌ Unable to retrieve PaymentIntent for charge:', charge.payment_intent, e);
+                    // Handle error silently
                 }
-            }
-            else {
-                console.warn('⚠️ charge.succeeded had no payment_intent or metadata to process');
             }
         }
         res.json({ received: true });
     }
     catch (err) {
-        console.log("⚠️ Webhook error:", err);
-        console.error("⚠️ Webhook error:", err.message);
         res.status(400).send(`Webhook Error: ${err.message}`);
     }
 };
@@ -210,7 +173,7 @@ const getPaymentSession = async (req, res) => {
                     id: item.id,
                     title: material.title,
                     quantity: item.quantity,
-                    amount: Math.round(material.price * 100), // Amount in cents
+                    amount: Math.round(material.price * 100),
                     cover: material.cover
                 });
             }

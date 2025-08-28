@@ -181,14 +181,12 @@ const createMaterial = async (req, res) => {
         }
     }
     else if (selectedResource === 'paid') {
-        console.log('Création d\'une ressource payante', files?.pdf?.[0]);
         if (!title || isNaN(priceNum) || !description || !files?.cover?.[0] || !files?.pdf?.[0] || !files?.pictures?.[0]) {
             return res.status(400).json({ error: 'Title, description, price, cover, pictures and PDF are required for paid resources' });
         }
     }
     const coverUrl = files?.cover?.[0] ? `/uploads/${files.cover[0].filename}` : null;
     const pdfUrl = files?.pdf?.[0] ? `/uploads/${files.pdf[0].filename}` : null;
-    console.log('Création d\'une ressource payante', pdfUrl);
     const client = await database_1.database.connect();
     try {
         await client.query('BEGIN');

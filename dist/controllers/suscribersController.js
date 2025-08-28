@@ -4,7 +4,6 @@ exports.SuscribeNewsletter = void 0;
 const database_1 = require("../config/database");
 const SuscribeNewsletter = async (req, res) => {
     const { email, consent } = req.body;
-    console.log("Received subscription request:", { email, consent });
     if (!email) {
         return res.status(400).json({ error: "Email is required" });
     }

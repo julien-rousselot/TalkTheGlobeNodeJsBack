@@ -19,9 +19,7 @@ const sendPurchasedPDFs = async (email, items) => {
         const attachments = [];
         const itemTitles = [];
         for (const row of result.rows) {
-            console.log("in pdf function");
             if (!row.pdf) {
-                console.warn(`⚠️ Aucun PDF trouvé pour l'article id=${row.id} - ${row.title}`);
                 continue;
             }
             // Décoder le bytea en chemin string comme dans getFreeMaterials
@@ -33,7 +31,6 @@ const sendPurchasedPDFs = async (email, items) => {
                 pdfPath = row.pdf;
             }
             else {
-                console.warn(`⚠️ Format PDF inconnu pour l'article id=${row.id} - ${row.title}`);
                 continue;
             }
             const fullPath = path_1.default.join(__dirname, "../", pdfPath);
@@ -43,7 +40,6 @@ const sendPurchasedPDFs = async (email, items) => {
                 pdfBuffer = await promises_1.default.readFile(fullPath);
             }
             catch (err) {
-                console.log(`⚠️ Impossible de lire le PDF pour id=${row.id} - ${row.title}:`, err);
                 continue;
             }
             const sanitizedTitle = row.title.replace(/[^\w\s-]/g, '').trim();
@@ -55,8 +51,6 @@ const sendPurchasedPDFs = async (email, items) => {
             itemTitles.push(row.title);
         }
         if (attachments.length === 0) {
-            console.log("📭 Aucun PDF valide à envoyer.");
-            console.error("❌ Aucun PDF valide à envoyer pour ces articles.");
             return false;
         }
         await mailer_1.transporter.sendMail({
