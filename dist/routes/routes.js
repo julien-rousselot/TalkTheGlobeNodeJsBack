@@ -6,12 +6,14 @@ const authController_1 = require("../controllers/authController");
 const auth_1 = require("../middlewares/auth");
 const upload_1 = require("../middlewares/upload");
 const stripeController_1 = require("../controllers/stripeController");
+const suscribersController_1 = require("../controllers/suscribersController");
 const materialController_1 = require("../controllers/materialController");
 const router = (0, express_1.Router)();
 router.post('/send-email', mailerController_1.sendEmail);
 router.post('/send-suggestion', mailerController_1.sendSuggestion);
 router.post('/login', authController_1.login);
 router.post('/register', authController_1.register);
+router.post('/subscribe-newsletter', suscribersController_1.SuscribeNewsletter);
 router.get('/materials/resource', materialController_1.getFreeMaterials);
 router.get('/material', auth_1.requireAdmin, materialController_1.getAllMaterials);
 router.get('/materials/shop', materialController_1.getPaidMaterials);
@@ -22,6 +24,5 @@ router.delete('/material/:id', auth_1.authenticateToken, auth_1.requireAdmin, ma
 router.get("/download/:id", auth_1.authenticateToken, materialController_1.downloadMaterial);
 // Création paiement
 router.post('/stripe/create-payment-intent', stripeController_1.createPaymentIntent);
-// router.post("/webhook", handleStripeWebhook);
 router.post('/stripe/payment-session', stripeController_1.getPaymentSession);
 exports.default = router;

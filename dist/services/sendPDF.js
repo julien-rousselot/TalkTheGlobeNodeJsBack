@@ -14,13 +14,12 @@ const sendPurchasedPDFs = async (email, items) => {
         return false;
     }
     try {
-        console.log(`🔧 Preparing to send PDFs to ${email} for ${items.length} items`);
         const ids = items.map(i => i.id);
         const result = await database_1.database.query(`SELECT id, title, pdf FROM materials WHERE id = ANY($1)`, [ids]);
-        console.log(`📄 Found ${result.rows.length} materials in database`);
         const attachments = [];
         const itemTitles = [];
         for (const row of result.rows) {
+            console.log("in pdf function");
             if (!row.pdf) {
                 console.warn(`⚠️ Aucun PDF trouvé pour l'article id=${row.id} - ${row.title}`);
                 continue;
@@ -44,7 +43,7 @@ const sendPurchasedPDFs = async (email, items) => {
                 pdfBuffer = await promises_1.default.readFile(fullPath);
             }
             catch (err) {
-                console.error(`❌ Impossible de lire le PDF pour id=${row.id} - ${row.title}:`, err);
+                console.log(`⚠️ Impossible de lire le PDF pour id=${row.id} - ${row.title}:`, err);
                 continue;
             }
             const sanitizedTitle = row.title.replace(/[^\w\s-]/g, '').trim();
@@ -54,30 +53,28 @@ const sendPurchasedPDFs = async (email, items) => {
                 contentType: "application/pdf",
             });
             itemTitles.push(row.title);
-            console.log(`✅ Added PDF attachment for: ${row.title} (${pdfBuffer.length} bytes)`);
         }
         if (attachments.length === 0) {
+            console.log("📭 Aucun PDF valide à envoyer.");
             console.error("❌ Aucun PDF valide à envoyer pour ces articles.");
             return false;
         }
-        console.log(`📧 Sending email with ${attachments.length} PDF attachments to ${email}`);
         await mailer_1.transporter.sendMail({
             from: process.env.EMAIL_USER || 'talktheglobe7@gmail.com',
             to: email,
-            subject: "Votre achat TalkTheGlobe - Documents PDF",
+            subject: "Your TalkTheGlobe Purchase - PDF Documents",
             html: `
-        <h2>Merci pour votre achat !</h2>
-        <p>Bonjour,</p>
-        <p>Merci d'avoir effectué un achat sur TalkTheGlobe. Vous trouverez en pièces jointes les documents PDF que vous avez achetés :</p>
+        <h2>Thank you for your purchase!</h2>
+        <p>Hello,</p>
+        <p>Thank you for making a purchase on TalkTheGlobe. Please find attached the PDF documents you purchased:</p>
         <ul>
           ${itemTitles.map(title => `<li>${title}</li>`).join('')}
         </ul>
-        <p>Nous espérons que ces ressources vous seront utiles dans votre apprentissage !</p>
-        <p>Cordialement,<br>L'équipe TalkTheGlobe</p>
+        <p>We hope these resources will be useful for your learning!</p>
+        <p>Best regards,<br>The TalkTheGlobe Team</p>
       `,
             attachments,
         });
-        console.log("✅ Email avec PDFs envoyé avec succès à", email);
         return true;
     }
     catch (err) {
