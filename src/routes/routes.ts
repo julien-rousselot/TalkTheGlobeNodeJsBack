@@ -23,14 +23,14 @@ router.post('/send-email', sendEmail);
 router.post('/send-suggestion', sendSuggestion);
 router.post('/login', login);
 router.post('/register', register);
-router.post('/subscribe-newsletter', SuscribeNewsletter)
+router.post('/subscribe-newsletter', SuscribeNewsletter);
 
 router.get('/materials/resource', getFreeMaterials);
-router.get('/material', requireAdmin, getAllMaterials);
+router.get('/materials',authenticateToken, requireAdmin, getAllMaterials);
 router.get('/materials/shop', getPaidMaterials);
 router.get('/material/:id', getMaterialById);
 router.post('/material', authenticateToken, requireAdmin, upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'pictures', maxCount: 10 }, { name: 'pdf', maxCount: 1 }]), createMaterial);
-router.put('/material/:id', authenticateToken, requireAdmin, updateMaterial);
+router.put('/material/:id', authenticateToken, requireAdmin, upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'pictures', maxCount: 10 }, { name: 'pdf', maxCount: 1 }]), updateMaterial);
 router.delete('/material/:id', authenticateToken, requireAdmin, deleteMaterial);
 router.get("/download/:id", authenticateToken, downloadMaterial);
 

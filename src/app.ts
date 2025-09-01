@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
@@ -35,5 +36,3 @@ database.connect()
 app.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur le port ${PORT}`);
 });
-
-

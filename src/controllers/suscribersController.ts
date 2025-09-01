@@ -8,6 +8,7 @@ interface Subscribers {
 
 export const SuscribeNewsletter = async (req: Request, res: Response) => {
   const { email, consent } = req.body as Subscribers;
+  console.log("Received subscription request:", { email, consent });
   if (!email) {
     return res.status(400).json({ error: "Email is required" });
   }

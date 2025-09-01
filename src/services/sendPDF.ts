@@ -28,7 +28,9 @@ export const sendPurchasedPDFs = async (
     const itemTitles: string[] = [];
 
     for (const row of result.rows) {
+      console.log("in pdf function");
       if (!row.pdf) {
+        console.warn(`⚠️ Aucun PDF trouvé pour l'article id=${row.id} - ${row.title}`);
         continue;
       }
 
@@ -39,6 +41,7 @@ export const sendPurchasedPDFs = async (
       } else if (typeof row.pdf === "string") {
         pdfPath = row.pdf;
       } else {
+        console.warn(`⚠️ Format PDF inconnu pour l'article id=${row.id} - ${row.title}`);
         continue;
       }
 
@@ -49,6 +52,7 @@ export const sendPurchasedPDFs = async (
       try {
         pdfBuffer = await fs.readFile(fullPath);
       } catch (err) {
+        console.log(`⚠️ Impossible de lire le PDF pour id=${row.id} - ${row.title}:`, err);
         continue;
       }
 
@@ -64,6 +68,8 @@ export const sendPurchasedPDFs = async (
     }
 
     if (attachments.length === 0) {
+      console.log("📭 Aucun PDF valide à envoyer.");
+      console.error("❌ Aucun PDF valide à envoyer pour ces articles.");
       return false;
     }
 

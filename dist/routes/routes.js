@@ -15,11 +15,11 @@ router.post('/login', authController_1.login);
 router.post('/register', authController_1.register);
 router.post('/subscribe-newsletter', suscribersController_1.SuscribeNewsletter);
 router.get('/materials/resource', materialController_1.getFreeMaterials);
-router.get('/material', auth_1.requireAdmin, materialController_1.getAllMaterials);
+router.get('/materials', auth_1.authenticateToken, auth_1.requireAdmin, materialController_1.getAllMaterials);
 router.get('/materials/shop', materialController_1.getPaidMaterials);
 router.get('/material/:id', materialController_1.getMaterialById);
 router.post('/material', auth_1.authenticateToken, auth_1.requireAdmin, upload_1.upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'pictures', maxCount: 10 }, { name: 'pdf', maxCount: 1 }]), materialController_1.createMaterial);
-router.put('/material/:id', auth_1.authenticateToken, auth_1.requireAdmin, materialController_1.updateMaterial);
+router.put('/material/:id', auth_1.authenticateToken, auth_1.requireAdmin, upload_1.upload.fields([{ name: 'cover', maxCount: 1 }, { name: 'pictures', maxCount: 10 }, { name: 'pdf', maxCount: 1 }]), materialController_1.updateMaterial);
 router.delete('/material/:id', auth_1.authenticateToken, auth_1.requireAdmin, materialController_1.deleteMaterial);
 router.get("/download/:id", auth_1.authenticateToken, materialController_1.downloadMaterial);
 // Création paiement

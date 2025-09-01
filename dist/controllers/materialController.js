@@ -20,11 +20,11 @@ const getAllMaterials = async (_req, res) => {
         m.price,
         m.pdf,
         m.publish_at,
+        m.is_draft,
         p.id AS picture_id,
         p.url
       FROM materials m
       LEFT JOIN pictures p ON m.id = p.material_id
-      WHERE m.publish_at IS NULL OR m.publish_at <= NOW()
       ORDER BY m.id;
     `);
         // Regrouper les résultats par matériel
@@ -39,6 +39,7 @@ const getAllMaterials = async (_req, res) => {
                     price: row.price,
                     pdf: row.pdf,
                     publishAt: row.publish_at,
+                    isDraft: row.is_draft,
                     pictures: []
                 };
             }
@@ -74,7 +75,8 @@ const getFreeMaterials = async (_req, res) => {
       FROM materials m
       LEFT JOIN pictures p ON m.id = p.material_id
       WHERE (m.publish_at IS NULL OR m.publish_at <= NOW())
-        AND m.price IS NULL
+        AND (m.price IS NULL OR m.price = 0)
+        AND (m.is_draft = false OR m.is_draft IS NULL)
       ORDER BY m.id;
     `);
         const materialsMap = {};
@@ -125,6 +127,7 @@ const getPaidMaterials = async (_req, res) => {
       WHERE m.stripe_product_id IS NOT NULL
         AND m.stripe_price_id IS NOT NULL
         AND (m.publish_at IS NULL OR m.publish_at <= NOW())
+        AND (m.is_draft = false OR m.is_draft IS NULL)
       ORDER BY m.id;
     `);
         const materialsMap = {};
@@ -181,12 +184,14 @@ const createMaterial = async (req, res) => {
         }
     }
     else if (selectedResource === 'paid') {
+        console.log('Création d\'une ressource payante', files?.pdf?.[0]);
         if (!title || isNaN(priceNum) || !description || !files?.cover?.[0] || !files?.pdf?.[0] || !files?.pictures?.[0]) {
             return res.status(400).json({ error: 'Title, description, price, cover, pictures and PDF are required for paid resources' });
         }
     }
     const coverUrl = files?.cover?.[0] ? `/uploads/${files.cover[0].filename}` : null;
     const pdfUrl = files?.pdf?.[0] ? `/uploads/${files.pdf[0].filename}` : null;
+    console.log('Création d\'une ressource payante', pdfUrl);
     const client = await database_1.database.connect();
     try {
         await client.query('BEGIN');
@@ -279,17 +284,28 @@ const sendIdForPayment = async (id) => {
 exports.sendIdForPayment = sendIdForPayment;
 const updateMaterial = async (req, res) => {
     const id = parseInt(req.params.id);
-    const { title, description, price, pictures } = req.body;
+    const { title, description, price, selectedResource, isDraft, publish_at } = req.body;
+    const files = req.files;
     if (isNaN(id)) {
         return res.status(400).json({ error: 'ID invalide' });
     }
-    if (!title && !description && price === undefined && !pictures) {
-        return res.status(400).json({ error: 'Aucune donnée à mettre à jour' });
+    const priceNum = Number(price);
+    // Vérifications selon le type de ressource
+    if (selectedResource === 'free') {
+        if (!title && !description && !files?.cover?.[0] && !files?.pdf?.[0]) {
+            return res.status(400).json({ error: 'Aucune donnée à mettre à jour pour une ressource gratuite' });
+        }
     }
+    else if (selectedResource === 'paid') {
+        if (!title && isNaN(priceNum) && !description && !files?.cover?.[0] && !files?.pdf?.[0] && !files?.pictures?.[0]) {
+            return res.status(400).json({ error: 'Aucune donnée à mettre à jour pour une ressource payante' });
+        }
+    }
+    const coverUrl = files?.cover?.[0] ? `/uploads/${files.cover[0].filename}` : undefined;
+    const pdfUrl = files?.pdf?.[0] ? `/uploads/${files.pdf[0].filename}` : undefined;
     const client = await database_1.database.connect();
     try {
         await client.query('BEGIN');
-        // Construction dynamique de la requête SQL
         const fields = [];
         const values = [];
         let paramIndex = 1;
@@ -297,26 +313,41 @@ const updateMaterial = async (req, res) => {
             fields.push(`title = $${paramIndex++}`);
             values.push(title);
         }
-        if (description !== undefined) {
+        if (description) {
             fields.push(`description = $${paramIndex++}`);
             values.push(description);
         }
-        if (price !== undefined) {
+        if (!isNaN(priceNum)) {
             fields.push(`price = $${paramIndex++}`);
-            values.push(price);
+            values.push(priceNum);
+        }
+        if (coverUrl) {
+            fields.push(`cover = $${paramIndex++}`);
+            values.push(coverUrl);
+        }
+        if (pdfUrl) {
+            fields.push(`pdf = $${paramIndex++}`);
+            values.push(pdfUrl);
+        }
+        if (isDraft !== undefined) {
+            fields.push(`is_draft = $${paramIndex++}`);
+            values.push(isDraft === 'true' || isDraft === true);
+        }
+        if (publish_at !== undefined) {
+            fields.push(`publish_at = $${paramIndex++}`);
+            values.push(publish_at || null);
         }
         if (fields.length > 0) {
             await client.query(`UPDATE materials SET ${fields.join(', ')} WHERE id = $${paramIndex}`, [...values, id]);
         }
-        if (Array.isArray(pictures)) {
+        if (files?.pictures?.length) {
             // Supprimer les anciennes photos
             await client.query('DELETE FROM pictures WHERE material_id = $1', [id]);
             // Ajouter les nouvelles
-            if (pictures.length > 0) {
-                const placeholders = pictures.map((_, i) => `($1, $${i + 2})`).join(', ');
-                const picValues = [id, ...pictures];
-                await client.query(`INSERT INTO pictures (material_id, url) VALUES ${placeholders}`, picValues);
-            }
+            const picturesUrls = files.pictures.map(file => `/uploads/${file.filename}`);
+            const placeholders = picturesUrls.map((_, i) => `($1, $${i + 2})`).join(', ');
+            const valuesPics = [id, ...picturesUrls];
+            await client.query(`INSERT INTO pictures (material_id, url) VALUES ${placeholders}`, valuesPics);
         }
         await client.query('COMMIT');
         res.status(200).json({ message: 'Matériel mis à jour avec succès' });

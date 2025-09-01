@@ -16,6 +16,7 @@ const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY, {
 // Création du PaymentIntent
 const createPaymentIntent = async (req, res) => {
     const { items, email } = req.body;
+    console.log('Création d\'un PaymentIntent pour l\'email:');
     if (!email) {
         return res.status(400).json({ error: "Email requis pour l'envoi du PDF" });
     }
@@ -70,29 +71,36 @@ const createPaymentIntent = async (req, res) => {
 exports.createPaymentIntent = createPaymentIntent;
 const handleStripeWebhook = async (req, res) => {
     const sig = req.headers["stripe-signature"];
+    console.log("🔧 Webhook received:");
     try {
         const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+        console.log("🔧 Webhook event constructed:", event.type);
         // helper to process a PaymentIntent object (shared between events)
         const processPaymentIntent = async (paymentIntent) => {
             if (!paymentIntent)
                 return;
+            console.log("✅ Processing PaymentIntent:", paymentIntent.id);
             // Check if we've already processed this payment to avoid duplicate emails
             const existingProcessed = await database_1.database.query('SELECT id FROM processed_payments WHERE payment_intent_id = $1', [paymentIntent.id]);
             if (existingProcessed.rows.length > 0) {
+                console.log(`⚠️ PaymentIntent ${paymentIntent.id} already processed, skipping email sending`);
                 return;
             }
             const customerEmail = paymentIntent.metadata.email;
             const itemsData = paymentIntent.metadata.items;
             if (!customerEmail) {
+                console.error("❌ Email client manquant dans les métadonnées");
                 return;
             }
             if (!itemsData) {
+                console.error("❌ Données d'articles manquantes dans les métadonnées");
                 return;
             }
             try {
                 // Mark as processing to prevent concurrent processing
                 await database_1.database.query('INSERT INTO processed_payments (payment_intent_id, status, processed_at) VALUES ($1, $2, NOW()) ON CONFLICT (payment_intent_id) DO NOTHING', [paymentIntent.id, 'processing']);
                 const simplifiedItems = JSON.parse(itemsData);
+                console.log(`📧 Préparation de l'envoi des PDFs à ${customerEmail} pour ${simplifiedItems.length} articles`);
                 const enrichedItems = [];
                 for (const item of simplifiedItems) {
                     const material = await (0, materialController_1.sendIdForPayment)(item.id);
@@ -106,12 +114,20 @@ const handleStripeWebhook = async (req, res) => {
                         });
                     }
                 }
+                console.log("🔧 About to call sendPurchasedPDFs for:", customerEmail, "items:", enrichedItems.length);
                 const success = await (0, sendPDF_1.sendPurchasedPDFs)(customerEmail, enrichedItems);
                 // Update status based on success
                 const finalStatus = success ? 'completed' : 'failed';
                 await database_1.database.query('UPDATE processed_payments SET status = $1, processed_at = NOW() WHERE payment_intent_id = $2', [finalStatus, paymentIntent.id]);
+                if (success) {
+                    console.log(`✅ PDFs envoyés avec succès à ${customerEmail}`);
+                }
+                else {
+                    console.error(`❌ Échec de l'envoi des PDFs à ${customerEmail}`);
+                }
             }
             catch (parseError) {
+                console.error("❌ Erreur parsing des articles:", parseError);
                 // Mark as failed
                 await database_1.database.query('UPDATE processed_payments SET status = $1, processed_at = NOW() WHERE payment_intent_id = $2', ['failed', paymentIntent.id]);
             }
@@ -123,18 +139,19 @@ const handleStripeWebhook = async (req, res) => {
         else if (event.type === 'charge.succeeded') {
             // A Charge may be created/updated independently; try to find its PaymentIntent
             const charge = event.data.object;
+            console.log('🔔 charge.succeeded received for charge:', charge.id);
             // Prefer metadata on charge if present
             const chargeEmail = (charge.metadata && charge.metadata.email) || undefined;
             const chargeItems = (charge.metadata && charge.metadata.items) || undefined;
             if (chargeEmail && chargeItems) {
                 try {
                     const simplifiedItems = JSON.parse(chargeItems);
-                    // Build a paymentIntent-like object to reuse the processor
-                    const chargePI = { id: charge.payment_intent || `charge_${charge.id}`, metadata: { email: chargeEmail, items: chargeItems } };
-                    await processPaymentIntent(chargePI);
+                    // Build a fake paymentIntent-like object to reuse the processor
+                    const fakePI = { id: charge.payment_intent || `charge_${charge.id}`, metadata: { email: chargeEmail, items: chargeItems } };
+                    await processPaymentIntent(fakePI);
                 }
                 catch (e) {
-                    // Handle error silently
+                    console.error('❌ Failed to parse items from charge metadata:', e);
                 }
             }
             else if (charge.payment_intent) {
@@ -143,13 +160,18 @@ const handleStripeWebhook = async (req, res) => {
                     await processPaymentIntent(pi);
                 }
                 catch (e) {
-                    // Handle error silently
+                    console.error('❌ Unable to retrieve PaymentIntent for charge:', charge.payment_intent, e);
                 }
+            }
+            else {
+                console.warn('⚠️ charge.succeeded had no payment_intent or metadata to process');
             }
         }
         res.json({ received: true });
     }
     catch (err) {
+        console.log("⚠️ Webhook error:", err);
+        console.error("⚠️ Webhook error:", err.message);
         res.status(400).send(`Webhook Error: ${err.message}`);
     }
 };
