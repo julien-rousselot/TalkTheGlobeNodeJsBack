@@ -8,13 +8,30 @@ interface Subscribers {
 
 export const SuscribeNewsletter = async (req: Request, res: Response) => {
   const { email, consent } = req.body as Subscribers;
-  console.log("Received subscription request:", { email, consent });
+  
   if (!email) {
     return res.status(400).json({ error: "Email is required" });
   }
 
   if (consent === undefined || consent === null) {
     return res.status(400).json({ error: "Consent is required" });
+  }
+
+  // Additional check: verify that consent is actually true
+  if (!consent) {
+    return res.status(400).json({ 
+      error: "Newsletter subscription requires explicit consent",
+      message: "You must consent to receive marketing emails to subscribe to the newsletter"
+    });
+  }
+
+  // Check if user has cookie consent for marketing (if middleware didn't already check)
+  if (!req.consentInfo?.marketing_allowed) {
+    return res.status(403).json({
+      error: "Marketing consent required",
+      message: "You must accept marketing cookies before subscribing to the newsletter",
+      code: "MARKETING_CONSENT_REQUIRED"
+    });
   }
 
   try {

@@ -14,7 +14,6 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
 // Création du PaymentIntent
 export const createPaymentIntent = async (req: Request, res: Response) => {
   const { items, email } = req.body as { items: { id: number; quantity: number }[], email: string };
-  console.log('Création d\'un PaymentIntent pour l\'email:');
   if (!email) {
     return res.status(400).json({ error: "Email requis pour l'envoi du PDF" });
   }
@@ -80,15 +79,12 @@ export const createPaymentIntent = async (req: Request, res: Response) => {
 
 export const handleStripeWebhook = async (req: Request, res: Response) => {
   const sig = req.headers["stripe-signature"]!;
-  console.log("🔧 Webhook received:");
   try {
     const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET!);
-    console.log("🔧 Webhook event constructed:", event.type);
 
     // helper to process a PaymentIntent object (shared between events)
     const processPaymentIntent = async (paymentIntent: Stripe.PaymentIntent) => {
       if (!paymentIntent) return;
-      console.log("✅ Processing PaymentIntent:", paymentIntent.id);
 
       // Check if we've already processed this payment to avoid duplicate emails
       const existingProcessed = await database.query(
@@ -97,7 +93,6 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
       );
 
       if (existingProcessed.rows.length > 0) {
-        console.log(`⚠️ PaymentIntent ${paymentIntent.id} already processed, skipping email sending`);
         return;
       }
 
@@ -122,7 +117,6 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
         );
 
         const simplifiedItems = JSON.parse(itemsData);
-        console.log(`📧 Préparation de l'envoi des PDFs à ${customerEmail} pour ${simplifiedItems.length} articles`);
 
         const enrichedItems: any[] = [];
         for (const item of simplifiedItems) {
@@ -138,7 +132,6 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
           }
         }
 
-        console.log("🔧 About to call sendPurchasedPDFs for:", customerEmail, "items:", enrichedItems.length);
         const success = await sendPurchasedPDFs(customerEmail, enrichedItems);
 
         // Update status based on success
@@ -149,7 +142,6 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
         );
 
         if (success) {
-          console.log(`✅ PDFs envoyés avec succès à ${customerEmail}`);
         } else {
           console.error(`❌ Échec de l'envoi des PDFs à ${customerEmail}`);
         }
@@ -169,7 +161,6 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
     } else if (event.type === 'charge.succeeded') {
       // A Charge may be created/updated independently; try to find its PaymentIntent
       const charge = event.data.object as Stripe.Charge;
-      console.log('🔔 charge.succeeded received for charge:', charge.id);
 
       // Prefer metadata on charge if present
       const chargeEmail = (charge.metadata && charge.metadata.email) || undefined;
@@ -197,7 +188,6 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
 
     res.json({ received: true });
   } catch (err: any) {
-    console.log("⚠️ Webhook error:", err);
     console.error("⚠️ Webhook error:", err.message);
     res.status(400).send(`Webhook Error: ${err.message}`);
   }
