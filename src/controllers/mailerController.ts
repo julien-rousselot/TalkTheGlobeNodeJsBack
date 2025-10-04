@@ -1,6 +1,7 @@
 // src/controllers/mailerController.ts
 import { Request, Response } from 'express';
 import { transporter } from '../config/mailer';
+import validator from 'validator';
 
 export const sendEmail = async (req: Request, res: Response) => {
   const { email, message, name } = req.body;
@@ -9,12 +10,15 @@ export const sendEmail = async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Données invalides' });
   }
 
+  const safeName = validator.escape(name);      // échappe <, >, &, etc.
+  const safeMessage = validator.escape(message);
+
   const mailOptions = {
     from: process.env.EMAIL_USER,
     replyTo: email,
     to: process.env.EMAIL_USER,
-    subject: `Nouveau message de ${name}`,
-    text: message,
+    subject: `Nouveau message de ${safeName}`,
+    text: safeMessage,
   };
 
   try {

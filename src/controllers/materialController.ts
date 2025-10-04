@@ -135,6 +135,8 @@ export const getPaidMaterials = async (_req: Request, res: Response) => {
         m.title,
         m.description,
         m.cover,
+        m.publish_at,              
+        m.is_draft,                    
         m.stripe_product_id,
         m.stripe_price_id,
         p.id AS picture_id,
@@ -159,6 +161,8 @@ export const getPaidMaterials = async (_req: Request, res: Response) => {
           title: row.title,
           description: row.description,
           cover: row.cover,
+          publishAt: row.publish_at,
+          isDraft: row.is_draft,
           stripeProductId: row.stripe_product_id,
           stripePriceId: row.stripe_price_id,
           pictures: []
