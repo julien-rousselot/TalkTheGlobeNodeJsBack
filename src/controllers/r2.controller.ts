@@ -99,7 +99,6 @@ export const uploadFileToR2 = async (file: Express.Multer.File, folder: string =
   if (file.buffer) {
     fileBuffer = file.buffer;
   } else if ((file as any).path) {
-    console.log(`📁 Reading file from disk: ${(file as any).path}`);
     const fs = require('fs');
     fileBuffer = fs.readFileSync((file as any).path);
   } else {
@@ -121,8 +120,6 @@ export const uploadFileToR2 = async (file: Express.Multer.File, folder: string =
   const cleanFolder = folder.endsWith('/') ? folder.slice(0, -1) : folder;
   const key = cleanFolder ? `${cleanFolder}/${fileName}` : fileName;
 
-  console.log(`📤 Uploading ${key} to bucket: ${process.env.R2_BUCKET_NAME}`);
-  
   await s3.send(
     new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME!,
@@ -134,7 +131,6 @@ export const uploadFileToR2 = async (file: Express.Multer.File, folder: string =
   );
 
   const publicUrl = `${process.env.R2_BASE_URL}/${key}`;
-  console.log(` Upload successful: ${publicUrl}`);
   
   return publicUrl;
 };
