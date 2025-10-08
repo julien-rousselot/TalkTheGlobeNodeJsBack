@@ -1,14 +1,18 @@
 import { Request, Response } from 'express';
-import { database } from '../config/database';
 import { AuthRequest } from '../types';
+import { database } from '../config/database';
+import { uploadFileToR2 } from './r2.controller';
 import Stripe from 'stripe';
 import path from "path";
 import fs from "fs";
-import { PoolClient } from 'pg';
+// import { R2 } from '@cloudflare/r2'; // Removed: module does not exist
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const PDF_DIR = path.join(__dirname, "../uploads");
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {apiVersion: '2025-07-30.basil'});  
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {apiVersion: '2025-07-30.basil'});
 
 interface Material {
   title: string;
@@ -205,6 +209,10 @@ export const createMaterial = async (req: Request, res: Response) => {
   const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
 
   const priceNum = Number(price);
+  let coverUrl: string | null = null;
+  let pdfUrl: string | null = null;
+  let stripeProductId: string | null = null;
+  let stripePriceId: string | null = null;
 
   // Vérifications selon le type de ressource
   if (selectedResource === 'free') {
@@ -217,8 +225,14 @@ export const createMaterial = async (req: Request, res: Response) => {
     }
   }
 
-  const coverUrl = files?.cover?.[0] ? `/uploads/${files.cover[0].filename}` : null;
-  const pdfUrl = files?.pdf?.[0] ? `/uploads/${files.pdf[0].filename}` : null;
+  if (files?.cover?.[0]) {
+    coverUrl = await uploadFileToR2(files.cover[0], 'covers/');
+  }
+
+  if (files?.pdf?.[0]) {
+    pdfUrl = await uploadFileToR2(files.pdf[0], 'pdfs/');
+  }
+
   const client = await database.connect();
 
   try {
@@ -233,7 +247,13 @@ export const createMaterial = async (req: Request, res: Response) => {
     const materialId = materialResult.rows[0].id;
 
     if (files?.pictures?.length) {
-      const picturesUrls = files.pictures.map(file => `/uploads/${file.filename}`);
+      // Upload pictures to R2
+      const picturesUrls: string[] = [];
+      for (const picture of files.pictures) {
+        const pictureUrl = await uploadFileToR2(picture, 'pictures/');
+        picturesUrls.push(pictureUrl);
+      }
+      
       const placeholders = picturesUrls.map((_, i) => `($1, $${i + 2})`).join(', ');
       const values = [materialId, ...picturesUrls];
 
@@ -242,10 +262,6 @@ export const createMaterial = async (req: Request, res: Response) => {
         values
       );
     }
-
-    // --- Création du Product et Price Stripe si c'est payant ---
-    let stripeProductId: string | null = null;
-    let stripePriceId: string | null = null;
 
     if (selectedResource === 'paid') {
       const product = await stripe.products.create({
@@ -371,8 +387,17 @@ export const updateMaterial = async (req: Request, res: Response) => {
     }
   }
 
-  const coverUrl = files?.cover?.[0] ? `/uploads/${files.cover[0].filename}` : undefined;
-  const pdfUrl = files?.pdf?.[0] ? `/uploads/${files.pdf[0].filename}` : undefined;
+  // ✅ FIX: Use R2 uploads instead of local storage
+  let coverUrl: string | undefined = undefined;
+  let pdfUrl: string | undefined = undefined;
+
+  if (files?.cover?.[0]) {
+    coverUrl = await uploadFileToR2(files.cover[0], 'covers/');
+  }
+
+  if (files?.pdf?.[0]) {
+    pdfUrl = await uploadFileToR2(files.pdf[0], 'pdfs/');
+  }
 
   const client = await database.connect();
   try {
@@ -410,6 +435,7 @@ export const updateMaterial = async (req: Request, res: Response) => {
       fields.push(`publish_at = $${paramIndex++}`);
       values.push(publish_at || null);
     }
+
     if (fields.length > 0) {
       await client.query(
         `UPDATE materials SET ${fields.join(', ')} WHERE id = $${paramIndex}`,
@@ -417,11 +443,18 @@ export const updateMaterial = async (req: Request, res: Response) => {
       );
     }
 
+    // ✅ FIX: Upload pictures to R2
     if (files?.pictures?.length) {
       // Supprimer les anciennes photos
       await client.query('DELETE FROM pictures WHERE material_id = $1', [id]);
-      // Ajouter les nouvelles
-      const picturesUrls = files.pictures.map(file => `/uploads/${file.filename}`);
+      
+      // Upload new pictures to R2
+      const picturesUrls: string[] = [];
+      for (const picture of files.pictures) {
+        const pictureUrl = await uploadFileToR2(picture, 'pictures/');
+        picturesUrls.push(pictureUrl);
+      }
+      
       const placeholders = picturesUrls.map((_, i) => `($1, $${i + 2})`).join(', ');
       const valuesPics = [id, ...picturesUrls];
       await client.query(`INSERT INTO pictures (material_id, url) VALUES ${placeholders}`, valuesPics);
@@ -431,7 +464,6 @@ export const updateMaterial = async (req: Request, res: Response) => {
     res.status(200).json({ message: 'Matériel mis à jour avec succès' });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Erreur mise à jour matériel:', error);
     res.status(500).json({ error: 'Erreur serveur' });
   } finally {
     client.release();
