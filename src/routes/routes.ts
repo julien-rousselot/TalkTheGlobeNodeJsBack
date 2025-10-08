@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { sendEmail, sendSuggestion } from '../controllers/mailerController';
 import { login, register } from '../controllers/authController';
 import { authenticateToken, requireAdmin } from '../middlewares/auth';
-import { upload } from '../middlewares/upload';
+import { upload } from '../controllers/r2.controller'; // 🔧 Use R2 memory storage upload
 import { getPaymentSession, createPaymentIntent } from '../controllers/stripeController';
 import { SuscribeNewsletter } from '../controllers/suscribersController';
 import { recordConsent, checkConsent, checkConsentByIP, withdrawConsent } from '../controllers/consentController';
